@@ -1,0 +1,318 @@
+#!/usr/bin/env python
+
+# Driver for building, running and fuzzing the instrumented BOOM simulation.
+# Usage:
+#    build <CONFIG> -> build a chip configuration
+#    run   <BINARY> -> run a binary on the simulation
+#    fuzz  <CONFIG> -> fuzz the simulation
+
+import argparse
+import sys
+import os
+import subprocess
+import shutil
+
+import multiprocessing
+
+
+
+def build_simulation_name(config: str, debug: bool, old=False):
+    if old:
+        return f"./simulator-chipyard-{config}-debug" if debug else f"./simulator-chipyard-{config}"
+    return f"./run-{config}-debug" if debug else f"./run-{config}"
+
+
+def build_loadmem_flags(loadmem_file: str, loadmem_addr: str):
+    return f"+permissive +loadmem={loadmem_file} +loadmem_addr={loadmem_addr} +permissive-off"
+
+
+def elf2hex(elf: str, out: str):
+    command = f"/chipyard/scripts/smartelf2hex.sh {elf} > {out}"
+    subprocess.run(command, shell=True)
+
+
+#
+# export CFLAGS = "$CFLAGS -DFuzzConfig"
+# export CXXFLAGS = "$CXXFLAGS -DFuzzConfig"
+# make -j8 CONFIG=FuzzConfig SBT_PROJECT=fuzz MODEL_PACKAGE=chipyard MODEL=TestHarness debug
+#
+def build_sim(args):
+    jobs = multiprocessing.cpu_count() if args.jobs is None else args.jobs
+
+    # Add a DEFINE to the compilation flags to tell our custom test harness
+    # which config is being built
+    os.environ['CFLAGS'] = os.environ['CFLAGS'] + " -D" + args.config
+    os.environ['CXXFLAGS'] = os.environ['CXXFLAGS'] + " -D" + args.config
+
+    # Choose sanitizer (DFSAN or MSAN).
+    os.environ['CFLAGS'] = os.environ['CFLAGS'] + " -D" + args.sanitizer
+    os.environ['CXXFLAGS'] = os.environ['CXXFLAGS'] + " -D" + args.sanitizer
+
+    if args.debug:
+        os.environ['CFLAGS'] = os.environ['CFLAGS'] + " -DDEBUG"
+        os.environ['CXXFLAGS'] = os.environ['CXXFLAGS'] + " -DDEBUG"
+
+    # Run make
+    command = ['make', '-j', str(jobs), f'CONFIG={args.config}',
+               'SBT_PROJECT=fuzz', 'MODEL_PACKAGE=chipyard',
+               'MODEL=TestHarness']         #  f"VERILATOR_THREADS={verilator_threads}"
+    if args.debug_chip:
+        command.append("debug")
+
+    print(f"Executing: {' '.join(command)}")
+    subprocess.check_call(command)
+
+    # if args.trace:
+    #     # Rename the simulation binary to its standard name
+    #     shutil.move(build_simulation_name(config, True), build_simulation_name(config, False))
+
+#
+# ./simulator-chipyard-DebugConfig test 1 1000 2>&1 | tee out.log
+#
+def run_sim(args):
+    config = "MDSConfig" if args.mds else args.config
+    sim_binary = build_simulation_name(config, False)
+
+    flags = ""
+    additional_args = ""
+
+    init_code = "''" if args.init is None else args.init
+    if args.init is not None:
+        additional_args += f"{init_code}"
+
+    if args.code_regions is not None:
+        flags += f"CODE_REGIONS={args.code_regions}"
+
+    if args.verbose or args.report:
+        flags += "VERBOSE_SIM=1 VERBOSE_ISA=1 "
+        if args.report:
+            flags += "PRINT_CYCLES=1 PRINT_COVERAGE=1 PRINT_ROB=1 CRASH_REPORT=1 MEMDUMP=1 "
+
+    if args.mds:
+        init_path = '' if args.mds_init is None else args.mds_init
+        taint_cycle = 0 if args.mds_taint_cycle is None else args.mds_taint_cycle
+        flags += f"MDS=1 MDS_INIT={init_path} MDS_TAINT_CYCLE={taint_cycle} "
+
+    if args.logfile:
+        additional_args += f" > {args.logfile} 2>&1"
+
+    command = f"{flags} {sim_binary} {args.binary} {args.rom} {args.cycles} {additional_args}"
+    print(f"Executing: {command}")
+    subprocess.run(command, shell=True)
+
+#
+# mkdir in
+# mkdir out
+# cp seed in/seed
+# sim-fuzzer -i in/ -o out/ run-FuzzConfig @@ bootrom.img 0 20 init.bin
+#
+def run_fuzzer(args):
+    config = "MDSConfig" if args.mds else args.config
+    sim_binary = build_simulation_name(config, False)
+
+    init_code = "''" if args.init is None else args.init
+
+    os.makedirs(args.indir, exist_ok=True)
+    os.makedirs(args.outdir, exist_ok=True)
+
+    # Empty seed.
+    open(f"{args.indir}/seed", "w").close()
+
+    if args.mds:
+        init_path = '' if args.mds_init is None else args.mds_init
+        taint_cycle = 0 if args.mds_taint_cycle is None else args.mds_taint_cycle
+        flags += f" MDS=1 MDS_INIT={init_path} MDS_TAINT_CYCLE={taint_cycle}"
+
+    command = f"{args.aflpath} -i {args.indir} -o {args.outdir} {sim_binary} @@ {args.rom} {args.cycles} {init_code}"
+    print(f"Executing: {command}")
+    subprocess.run(command, shell=True)
+
+#
+# ./simulator-chipyard-MediumBoomConfig -V +permissive +loadmem=test.hex +loadmem_addr=80000000 +permissive-off test.riscv 2>&1 | spike-dasm | tee out.log
+#
+def run_sim_old(config: str,
+            binary: str,
+            verbose: bool,
+            loadmem_file: str,
+            loadmem_addr: str,
+            logfile: str,
+            cycles: int,
+            dasm: bool):
+
+    sim_binary = build_simulation_name(config, False, old=True)
+    verbose_flag = "-c -V" if verbose else ""
+
+    if loadmem_file == "":
+        loadmem_flags = ""
+    else:
+        loadmem_flags = build_loadmem_flags(loadmem_file, loadmem_addr)
+
+
+    dasm_helper = " 2>&1 | sed -e '/^ /s/(0x/DASM(/g' | spike-dasm" if dasm else ""
+    logger = f" | tee {logfile}" if logfile != "" else ""
+
+    command = f"{sim_binary} {verbose_flag} --max-cycles={cycles} {loadmem_flags} {binary}  {dasm_helper} {logger}"
+    print(f"Executing: {command}")
+    subprocess.run(command, shell=True)
+
+    print(f"[+] Sim ended, did you compile the source with the right linker?")
+
+
+class BoomFuzzer(object):
+
+    def __init__(self):
+        parser = argparse.ArgumentParser(
+            description='Fuzz BOOM',
+            usage='''Use phantom-trails <command> -h to get help on specific commands.
+
+Available commands are:
+   build     Build the simulation
+   run       Run a program on the instrumented simulation
+   fuzz      Fuzz the simulation
+   oldrun    Run a program on the "stock" BOOM simulation (e.g. MediumBoomConfig)
+''')
+        parser.add_argument('command', help='Subcommand to run')
+        # parse_args defaults to [1:] for args, but you need to
+        # exclude the rest of the args too, or validation will fail
+        args = parser.parse_args(sys.argv[1:2])
+        if not hasattr(self, args.command):
+            print('Unrecognized command')
+            parser.print_help()
+            exit(1)
+        # use dispatch pattern to invoke method with same name
+        getattr(self, args.command)()
+
+    def build(self):
+        parser = argparse.ArgumentParser(
+            description='Build the BOOM simulation',
+            usage='phantom-trails build [--config][-jN]')
+
+        parser.add_argument(
+            '--config', choices=['FuzzConfig', 'DebugConfig', 'MDSConfig', 'StandardPredConfig', 'SmallFuzzConfig'], default='FuzzConfig', help="Which configuration to use")
+        parser.add_argument(
+            '--debug', action='store_true', default=False, help="Print log during simulation")
+        parser.add_argument(
+            '--debug_chip', action='store_true', default=False, help="Build a debug version of the chip")
+        parser.add_argument(
+            '--sanitizer', choices=['DFSAN', 'MSAN'], default="MSAN", help="Choose sanitizer (DFSAN or MSAN)")
+        parser.add_argument(
+            '-j', '--jobs', type=int, default=8, help="Build-time parallel threads (make -jN)")
+        # parser.add_argument(
+        #     '-t', '--threads', type=int, default=1, help="Runtime parallel threads (VERILATOR_THREADS)")
+
+        args = parser.parse_args(sys.argv[2:])
+        build_sim(args)
+
+    def run(self):
+        parser = argparse.ArgumentParser(
+            description='Run a program on the simulation',
+            usage='phantom-trails run <binary> [--cycles=N][--rom=<path>][--init=<path>] [...]')
+
+        parser.add_argument(
+            'binary', help="Program to run, in flat-binary format")
+
+        parser.add_argument(
+            '--verbose', action='store_true', default=False, help="Print cycle-accurate simulation and Spike logs")
+        parser.add_argument(
+            '--config', choices=['FuzzConfig', 'DebugConfig', 'MDSConfig', 'StandardPredConfig', 'SmallFuzzConfig'], default='FuzzConfig', help="Which configuration to use")
+        parser.add_argument(
+            '--cycles', type=int, default=20, help="How many cycles per instruction to run the (arch) simulation for")
+        parser.add_argument(
+            '--rom', default="/boom-wrapper/boot/bootrom.rv64.img", help="Path of the ROM image")
+        parser.add_argument(
+            '--init', default="/boom-wrapper/init/init.bin", help="Path of the init code, can be empty")
+
+        parser.add_argument(
+            '--mds', action='store_true', default=False, required='--mds-init' in sys.argv, help="Run in MDS-detection mode (taint buffers after initialization)")
+        parser.add_argument(
+            '--mds-init', default="/boom-wrapper/init/init-mds.bin", help="Path of the MDS init code, can be empty")
+        parser.add_argument(
+            '--mds-taint-cycle', type=int, default=1640, help="Last cycle of the MDS initialization (buffers are tainted here)")
+
+        parser.add_argument(
+            '--code_regions', help="File specifying which regions contain code (default is the whole binary).")
+        parser.add_argument(
+            '--logfile', help="Where to log the simulation's output")
+        parser.add_argument(
+            '--report', action='store_true', default=False, help="Produce coverage, rob and crash reports")
+
+        args = parser.parse_args(sys.argv[2:])
+
+        if args.mds:
+            print("WARNING: --mds will overwrite also the --config used")
+
+        run_sim(args)
+
+    def fuzz(self):
+        parser = argparse.ArgumentParser(
+            description='Fuzz the simulation',
+            usage='phantom-trails fuzz [--cycles=N][--rom=<path>][--init=<path>] [...]')
+
+        parser.add_argument(
+            '--config', choices=['FuzzConfig', 'DebugConfig', 'MDSConfig', 'StandardPredConfig', 'SmallFuzzConfig'], default='FuzzConfig', help="Which configuration to use")
+        parser.add_argument(
+            '--cycles', type=int, default=20, help="How many cycles per instruction to run the (arch) simulation for")
+        parser.add_argument(
+            '--rom', default="/boom-wrapper/boot/bootrom.rv64.img", help="Path of the ROM image")
+        parser.add_argument(
+            '--init', default="/boom-wrapper/init/init.bin", help="Path of the init code, can be empty")
+
+        parser.add_argument(
+            '--mds', action='store_true', default=False, required='--mds-init' in sys.argv, help="Run in MDS-detection mode (taint buffers after initialization)")
+        parser.add_argument(
+            '--mds-init', default="/boom-wrapper/init/init-mds.bin", help="Path of the MDS init code, can be empty")
+        parser.add_argument(
+            '--mds-taint-cycle', type=int, default=1640, help="Last cycle of the MDS initialization (buffers are tainted here)")
+
+        parser.add_argument(
+            '--aflpath', default="sim-fuzzer", help="Path of afl-fuzz")
+        parser.add_argument(
+            '--indir', default="in", help="Name of the input dir for fuzzing")
+        parser.add_argument(
+            '--outdir', default="out", help="Name of the output dir for fuzzing")
+        parser.add_argument(
+            '--timeout', type=int, default=8000, help="Test-case timeout")
+
+        args = parser.parse_args(sys.argv[2:])
+
+        if args.mds:
+            print("WARNING: --mds will overwrite also the --config used")
+
+        run_fuzzer(args)
+
+    def oldrun(self):
+        parser = argparse.ArgumentParser(
+            description='Run a program on the stock BOOM simulation',
+            usage='phantom-trails oldrun <config> <binary> [--cycles][--verbose][<args>]')
+
+        parser.add_argument(
+            'config', help="Name of the configuration to run (e.g. MediumBoomConfig)")
+        parser.add_argument(
+            'binary', help="RISC-V elf binary to run on the simulation")
+        parser.add_argument(
+            '--cycles', type=int, default=-1, help="Number of cycles to run the simulation for")
+        parser.add_argument(
+            '--verbose', action='store_true', default=False,  help="Enable debug prints")
+        parser.add_argument(
+            '--logfile', default="", help="Where to log the simulation's output")
+        parser.add_argument(
+            '--skip_loadmem', action='store_true', default=False, help="Load the program through the simulation (slower)")
+        parser.add_argument(
+            '--loadmem_addr', default="80000000", help="Where to load the program (has not effect if there is --skip_loadmem)")
+        parser.add_argument(
+            '--dasm', action='store_true', default=False, help="Disassemble output")
+
+        args = parser.parse_args(sys.argv[2:])
+
+        to_load = ""
+        if not args.skip_loadmem:
+            print("[+] running elf2hex")
+            elf2hex(args.binary, "binary_to_load.hex")
+            to_load = "binary_to_load.hex"
+            print("[+] Done!")
+
+        print("[+] Running simulation")
+        run_sim_old(args.config, args.binary, args.verbose, to_load, args.loadmem_addr, args.logfile, args.cycles, args.dasm)
+
+if __name__ == '__main__':
+    BoomFuzzer()

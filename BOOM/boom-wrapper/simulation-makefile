@@ -1,0 +1,348 @@
+
+#########################################################################################
+# verilator makefile
+#########################################################################################
+ifeq ($(shell which verilator),)
+$(error Did not find Verilator in PATH. Make sure all requirements are installed)
+endif
+
+base_dir=$(abspath ../..)
+sim_dir=$(abspath .)
+
+include $(base_dir)/variables.mk
+
+sim_name = verilator
+sim = $(sim_dir)/run-$(CONFIG)
+sim_debug = $(sim_dir)/run-$(CONFIG)-debug
+
+# If verilator seed unspecified, verilator uses srand as random seed
+ifdef RANDOM_SEED
+SEED_FLAG=+verilator+seed+I$(RANDOM_SEED)
+else
+SEED_FLAG=
+endif
+
+.PHONY: default debug
+default: $(sim)
+debug: $(sim_debug)
+
+
+FUZZ_DIR=/chipyard/generators/fuzz
+SRC_DIR=$(FUZZ_DIR)/src/main/resources/csrc
+ARCHISM_DIR=/ArchSim
+BOOTROM_DIR=$(FUZZ_DIR)/boot
+INITCODE_DIR=$(FUZZ_DIR)/init
+
+# Toggle the presence of MDS when building the core.
+MDS ?= 0
+ifdef ($(MDS))
+	ADDITIONAL_CHISEL_DEFINES=+define+MDS
+endif
+
+#----------------------------------------------------------------------------------------
+# Freestanding pre-requirements
+#----------------------------------------------------------------------------------------
+$(build_dir):
+	mkdir -p $@
+
+$(boot_code): $(build_dir)
+	cp -f $(BOOTROM_DIR)/*.img $(build_dir)
+
+$(init_code): $(build_dir)
+	cp -f $(INITCODE_DIR)/init $(build_dir)
+
+#----------------------------------------------------------------------------------------
+# Cpp sources
+#----------------------------------------------------------------------------------------
+SIM_FILE_REQS = \
+	$(ROCKETCHIP_RSRCS_DIR)/csrc/verilator.h \
+	$(SRC_DIR)/main.cc \
+	$(SRC_DIR)/Simulator.h \
+	$(SRC_DIR)/Classification.h \
+	$(SRC_DIR)/Taint.h \
+	$(SRC_DIR)/args.h \
+	$(SRC_DIR)/debug.h \
+	$(SRC_DIR)/debug.cc \
+	$(SRC_DIR)/uarch/Rob.h \
+	$(SRC_DIR)/uarch/RegFile.h \
+	$(SRC_DIR)/uarch/ICache.h \
+	$(SRC_DIR)/uarch/Flushes.h \
+	$(SRC_DIR)/uarch/Predictors.h \
+	$(SRC_DIR)/uarch/LSQ.h \
+	$(SRC_DIR)/uarch/LFB.h \
+	$(SRC_DIR)/uarch/top.h \
+	$(SRC_DIR)/uarch/SmallBoom.h \
+	$(SRC_DIR)/dpi/FakeDRAM.cc \
+	$(SRC_DIR)/dpi/FakeDRAM.h \
+	$(SRC_DIR)/dpi/SimMem.cc \
+	$(SRC_DIR)/dpi/SimMem.h \
+	$(ARCHISM_DIR)/SpikeWrapper.h \
+	$(ARCHISM_DIR)/SpikeWrapper.so \
+
+
+# Copy files and add -FI for *.h files in *.f, to tell verilator what to include.
+$(sim_files): $(SIM_FILE_REQS) | $(build_dir)
+	cp -f $^ $(build_dir)
+	$(foreach file,\
+		$^,\
+		$(if $(filter %.h,$(file)),\
+			echo "-FI $(addprefix $(build_dir)/, $(notdir $(file)))" >> $@;,\
+			echo "$(addprefix $(build_dir)/, $(notdir $(file)))" >> $@;))
+
+
+#########################################################################################
+# CHIPYARD STUFF
+#########################################################################################
+SHELL=/bin/bash
+
+# Disable all suffix rules to improve Make performance on systems running older
+# versions of Make
+.SUFFIXES:
+
+# Check environment
+ifndef RISCV
+$(error RISCV is unset. Did you source the Chipyard auto-generated env file (which activates the default conda environment)?)
+else
+$(info Running with RISCV=$(RISCV))
+endif
+
+# Prerequisite lists
+ifeq ($(shell which fd 2> /dev/null),)
+	lookup_srcs = $(shell find -L $(1)/ -name target -prune -o \( -iname "*.$(2)" ! -iname ".*" \) -print 2> /dev/null)
+else
+	lookup_srcs = $(shell fd -L -t f -e $(2) . $(1))
+endif
+
+SOURCE_DIRS = $(addprefix $(base_dir)/,generators sims/firesim/sim tools/barstools fpga/fpga-shells fpga/src)
+SCALA_SOURCES = $(call lookup_srcs,$(SOURCE_DIRS),scala)
+
+SBT_SOURCE_DIRS = $(addprefix $(base_dir)/,generators sims/firesim/sim tools)
+SBT_SOURCES = $(call lookup_srcs,$(SBT_SOURCE_DIRS),sbt) $(base_dir)/build.sbt $(base_dir)/project/plugins.sbt $(base_dir)/project/build.properties
+
+# # SBT server stuff
+# $(SBT_THIN_CLIENT_TIMESTAMP): $(SBT_SOURCES)
+# ifneq (,$(wildcard $(SBT_THIN_CLIENT_TIMESTAMP)))
+# 	cd $(base_dir) && $(SBT) "reload"
+# 	touch $@
+# else
+# 	cd $(base_dir) && $(SBT) "exit"
+# endif
+
+#----------------------------------------------------------------------------------------
+# FIRRTL
+#----------------------------------------------------------------------------------------
+$(FIRRTL_FILE) $(ANNO_FILE) &: $(SCALA_SOURCES) $(SBT_SOURCES)
+	mkdir -p $(build_dir)
+	$(call run_scala_main,$(SBT_PROJECT),$(GENERATOR_PACKAGE).Generator,\
+		--target-dir $(build_dir) \
+		--name $(long_name) \
+		--top-module $(MODEL_PACKAGE).$(MODEL) \
+		--legacy-configs $(CONFIG_PACKAGE):$(CONFIG) \
+		$(EXTRA_CHISEL_OPTIONS))
+
+.PHONY: firrtl
+firrtl: $(FIRRTL_FILE)
+
+#----------------------------------------------------------------------------------------
+# compilation to verilog
+#----------------------------------------------------------------------------------------
+REPL_SEQ_MEM = --infer-rw --repl-seq-mem -c:$(MODEL):-o:$(TOP_SMEMS_CONF)
+HARNESS_CONF_FLAGS = -thconf $(HARNESS_SMEMS_CONF)
+
+TOP_TARGETS = $(TOP_FILE) $(TOP_SMEMS_CONF) $(TOP_ANNO) $(TOP_FIR) $(sim_top_blackboxes)
+HARNESS_TARGETS = $(HARNESS_FILE) $(HARNESS_SMEMS_CONF) $(HARNESS_ANNO) $(HARNESS_FIR) $(sim_harness_blackboxes)
+
+VLOG_SOURCES = $(call lookup_srcs,$(SOURCE_DIRS),sv) $(call lookup_srcs,$(SOURCE_DIRS),v)
+
+# DOC include start: FirrtlCompiler
+$(TOP_TARGETS) $(HARNESS_TARGETS) &: $(FIRRTL_FILE) $(ANNO_FILE) $(VLOG_SOURCES)
+	$(call run_scala_main,tapeout,barstools.tapeout.transforms.GenerateTopAndHarness,\
+		--allow-unrecognized-annotations \
+		--output-file $(TOP_FILE) \
+		--harness-o $(HARNESS_FILE) \
+		--input-file $(FIRRTL_FILE) \
+		--syn-top $(TOP) \
+		--harness-top $(VLOG_MODEL) \
+		--annotation-file $(ANNO_FILE) \
+		--top-anno-out $(TOP_ANNO) \
+		--top-dotf-out $(sim_top_blackboxes) \
+		--top-fir $(TOP_FIR) \
+		--harness-anno-out $(HARNESS_ANNO) \
+		--harness-dotf-out $(sim_harness_blackboxes) \
+		--harness-fir $(HARNESS_FIR) \
+		$(REPL_SEQ_MEM) \
+		$(HARNESS_CONF_FLAGS) \
+		--target-dir $(build_dir) \
+		--log-level $(FIRRTL_LOGLEVEL) \
+		$(EXTRA_FIRRTL_OPTIONS))
+	touch $(sim_top_blackboxes) $(sim_harness_blackboxes)
+# DOC include end: FirrtlCompiler
+
+# This file is for simulation only. VLSI flows should replace this file with one containing hard SRAMs
+MACROCOMPILER_MODE ?= --mode synflops
+$(TOP_SMEMS_FILE) $(TOP_SMEMS_FIR) &: $(TOP_SMEMS_CONF)
+	$(call run_scala_main,tapeout,barstools.macros.MacroCompiler,-n $(TOP_SMEMS_CONF) -v $(TOP_SMEMS_FILE) -f $(TOP_SMEMS_FIR) $(MACROCOMPILER_MODE))
+
+HARNESS_MACROCOMPILER_MODE = --mode synflops
+$(HARNESS_SMEMS_FILE) $(HARNESS_SMEMS_FIR) &: $(HARNESS_SMEMS_CONF) | $(TOP_SMEMS_FILE)
+	$(call run_scala_main,tapeout,barstools.macros.MacroCompiler, -n $(HARNESS_SMEMS_CONF) -v $(HARNESS_SMEMS_FILE) -f $(HARNESS_SMEMS_FIR) $(HARNESS_MACROCOMPILER_MODE))
+
+# remove duplicate files and headers in list of simulation file inputs
+$(sim_common_files): $(sim_files) $(sim_top_blackboxes) $(sim_harness_blackboxes)
+	sort -u $^ | grep -v '.*\.\(svh\|h\)$$' > $@
+
+# helper rule to just make verilog files
+.PHONY: verilog
+verilog: $(sim_vsrcs)
+
+
+#----------------------------------------------------------------------------------------
+# Verilator flags
+#----------------------------------------------------------------------------------------
+VERILATOR := verilator --cc --exe
+
+VERILATOR_FST_MODE ?= 0
+TRACING_OPTS := $(if $(filter $(VERILATOR_FST_MODE),0),\
+	                  --trace,--trace-fst --trace-threads 1)
+TRACING_CFLAGS := $(if $(filter $(VERILATOR_FST_MODE),0),,-DCY_FST_TRACE)
+
+# we initially had --noassert for performance, but several modules use
+# assertions, including dramsim, so we enable --assert by default
+VERILATOR_OPT_FLAGS ?= \
+	-O3 \
+	--x-assign fast \
+	--x-initial fast \
+	--output-split 10000 \
+	--output-split-cfuncs 100
+
+# default flags added for external IP (cva6/NVDLA)
+VERILOG_IP_VERILATOR_FLAGS := \
+	--unroll-count 256 \
+	-Wno-PINCONNECTEMPTY \
+	-Wno-ASSIGNDLY \
+	-Wno-DECLFILENAME \
+	-Wno-UNUSED \
+	-Wno-UNOPTFLAT \
+	-Wno-BLKANDNBLK \
+	-Wno-style \
+	-Wall
+
+# normal flags used for chipyard builds (that are incompatible with vlog ip aka cva6/NVDLA)
+CHIPYARD_VERILATOR_FLAGS := \
+	--assert
+
+# options dependent on whether external IP (cva6/NVDLA) or just chipyard is used
+# NOTE: defer the evaluation of this until it is used!
+PLATFORM_OPTS = $(shell \
+	if grep -qiP "module\s+(CVA6|NVDLA)" $(build_dir)/*.*v; \
+	then echo "$(VERILOG_IP_VERILATOR_FLAGS)"; \
+	else echo "$(CHIPYARD_VERILATOR_FLAGS)"; fi)
+
+# Use --timescale to approximate timescale behavior of pre-4.034
+TIMESCALE_OPTS := $(shell verilator --version | perl -lne 'if (/(\d.\d+)/ && $$1 >= 4.034) { print "--timescale 1ns/1ps"; }')
+
+# see: https://github.com/ucb-bar/riscv-mini/issues/31
+MAX_WIDTH_OPTS = $(shell verilator --version | perl -lne 'if (/(\d.\d+)/ && $$1 > 4.016) { print "--max-num-width 1048576"; }')
+
+PREPROC_DEFINES := \
+	+define+PRINTF_COND=\$$c\(\"verbose\",\"\&\&\"\,\"done_reset\"\) \
+	+define+STOP_COND=\$$c\(\"done_reset\"\)
+
+
+VERILATOR_NONCC_OPTS = \
+	$(RUNTIME_PROFILING_VFLAGS) \
+	$(VERILATOR_OPT_FLAGS) \
+	$(PLATFORM_OPTS) \
+	-Wno-fatal \
+	$(TIMESCALE_OPTS) \
+	$(MAX_WIDTH_OPTS) \
+	$(PREPROC_DEFINES) \
+	--top-module $(VLOG_MODEL) \
+	-f $(sim_common_files) \
+	$(sim_vsrcs)
+#    --vpi
+# $(RUNTIME_THREADS)
+
+#----------------------------------------------------------------------------------------
+# gcc flags
+#----------------------------------------------------------------------------------------
+SIM_OPT_CXXFLAGS := -O3
+
+SIM_CXXFLAGS = \
+        $(CXXFLAGS) \
+        $(SIM_OPT_CXXFLAGS) \
+        -std=c++17 \
+        -I$(build_dir) \
+        $(EXTRA_SIM_CXXFLAGS)
+
+SIM_LDFLAGS = \
+        $(LDFLAGS) \
+        -L$(sim_dir) \
+        $(EXTRA_SIM_LDFLAGS)
+
+
+VERILATOR_CXXFLAGS = \
+	$(SIM_CXXFLAGS) \
+	$(RUNTIME_PROFILING_CFLAGS) \
+	$(TRACING_CFLAGS) \
+	-D__STDC_FORMAT_MACROS \
+	-DTEST_HARNESS=V$(VLOG_MODEL) \
+	-DVERILATOR \
+	-include $(build_dir)/$(long_name).plusArgs \
+	-include $(build_dir)/verilator.h
+
+VERILATOR_LDFLAGS = $(SIM_LDFLAGS)
+
+VERILATOR_CC_OPTS = \
+	-CFLAGS "$(VERILATOR_CXXFLAGS)" \
+	-LDFLAGS "$(VERILATOR_LDFLAGS)"
+
+#----------------------------------------------------------------------------------------
+# Verilator build
+#----------------------------------------------------------------------------------------
+# full verilator+gcc opts
+VERILATOR_OPTS = $(VERILATOR_CC_OPTS) $(VERILATOR_NONCC_OPTS)
+
+# release build files
+model_dir = $(build_dir)/$(long_name)
+model_header = $(model_dir)/V$(VLOG_MODEL).h
+model_mk = $(model_dir)/V$(VLOG_MODEL).mk
+# release verilator invokation
+$(model_mk): $(sim_vsrcs) $(sim_common_files)
+	rm -rf $(model_dir)
+	mkdir -p $(model_dir)
+	$(VERILATOR) $(VERILATOR_OPTS) -o $(sim) -Mdir $(model_dir) -CFLAGS "-include $(model_header)"
+	touch $@
+
+# debug build files
+model_dir_debug = $(build_dir)/$(long_name).debug
+model_header_debug = $(model_dir_debug)/V$(VLOG_MODEL).h
+model_mk_debug = $(model_dir_debug)/V$(VLOG_MODEL).mk
+# debug verilator invokation
+$(model_mk_debug): $(sim_vsrcs) $(sim_common_files)
+	rm -rf $(model_dir_debug)
+	mkdir -p $(model_dir_debug)
+	$(VERILATOR) $(VERILATOR_OPTS) -o $(sim_debug) $(TRACING_OPTS) -Mdir $(model_dir_debug) -CFLAGS "-include $(model_header_debug)"
+	touch $@
+
+#----------------------------------------------------------------------------------------
+# Whole simulation build build
+#----------------------------------------------------------------------------------------
+$(sim): $(model_mk) $(init_code) $(boot_code)
+	$(MAKE) VM_PARALLEL_BUILDS=1 -C $(model_dir) -f V$(VLOG_MODEL).mk
+
+$(sim_debug): $(model_mk_debug) $(dramsim_lib)
+	$(MAKE) VM_PARALLEL_BUILDS=1 -C $(model_dir_debug) -f V$(VLOG_MODEL).mk
+
+#########################################################################################
+# general cleanup rules
+#########################################################################################
+.PHONY: clean clean-sim clean-sim-debug
+clean:
+	rm -rf $(gen_dir) run-*
+
+clean-sim:
+	rm -rf $(model_dir) $(sim)
+
+clean-sim-debug:
+	rm -rf $(model_dir_debug) $(sim_debug)

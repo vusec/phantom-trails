@@ -1,0 +1,15 @@
+[submodule "AFL"]
+	path = AFL
+	url = git@github.com:vusec/hw-fuzzing-AFL.git
+[submodule "llvm"]
+	path = llvm
+	url = git@github.com:vusec/hw-fuzzing-llvm.git
+[submodule "ArchSim/riscv-isa-sim"]
+	path = ArchSim/riscv-isa-sim
+	url = git@github.com:riscv-software-src/riscv-isa-sim
+[submodule "Fuzzer"]
+	path = Fuzzer
+        url = git@github.com:vusec/hw-fuzzing-driver.git
+[submodule "riscv-transient-attacks"]
+	path = Samples
+	url = git@github.com:vusec/riscv-transient-attacks

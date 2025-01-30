@@ -1,0 +1,6 @@
+fun:statx=uninstrumented
+fun:statx=discard
+fun:runSpikeSim=uninstrumented
+fun:runSpikeSim=discard
+fun:__afl_manual_init=uninstrumented
+fun:__afl_manual_init=discard

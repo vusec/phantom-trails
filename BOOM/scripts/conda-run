@@ -1,0 +1,3 @@
+#!/bin/bash
+
+conda run --no-capture-output -p ${CONDA_ENV} /bin/bash -c "$@"

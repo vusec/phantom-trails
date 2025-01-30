@@ -1,0 +1,22 @@
+diff --git a/src/main/scala/ifu/bpd/bim.scala b/src/main/scala/ifu/bpd/bim.scala
+index 26656d45..b2fbd399 100644
+--- a/src/main/scala/ifu/bpd/bim.scala
++++ b/src/main/scala/ifu/bpd/bim.scala
+@@ -41,7 +41,7 @@ class BIMBranchPredictorBank(params: BoomBIMParams = BoomBIMParams())(implicit p
+   val s2_meta           = Wire(new BIMMeta)
+   override val metaSz   = s2_meta.asUInt.getWidth
+ 
+-  val doing_reset = RegInit(true.B)
++  val doing_reset = RegInit(false.B)
+   val reset_idx = RegInit(0.U(log2Ceil(nSets).W))
+   reset_idx := reset_idx + doing_reset
+   when (reset_idx === (nSets-1).U) { doing_reset := false.B }
+@@ -109,7 +109,7 @@ class BIMBranchPredictorBank(params: BoomBIMParams = BoomBIMParams())(implicit p
+   when (doing_reset || (s1_update.valid && s1_update.bits.is_commit_update)) {
+     data.write(
+       Mux(doing_reset, reset_idx, s1_update_index),
+-      Mux(doing_reset, VecInit(Seq.fill(bankWidth) { 2.U }), s1_update_wdata),
++      Mux(doing_reset, VecInit(Seq.fill(bankWidth) { 0.U(2.W) }), s1_update_wdata),
+       Mux(doing_reset, (~(0.U(bankWidth.W))), s1_update_wmask.asUInt).asBools
+     )
+   }

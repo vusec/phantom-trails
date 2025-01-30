@@ -1,0 +1,91 @@
+diff --git a/src/main/scala/common/parameters.scala b/src/main/scala/common/parameters.scala
+index 24e2beb4..06eb3cc0 100644
+--- a/src/main/scala/common/parameters.scala
++++ b/src/main/scala/common/parameters.scala
+@@ -100,7 +100,10 @@ case class BoomCoreParams(
+   /* debug stuff */
+   enableCommitLogPrintf: Boolean = false,
+   enableBranchPrintf: Boolean = false,
+-  enableMemtracePrintf: Boolean = false
++  enableMemtracePrintf: Boolean = false,
++
++  /* Backported vulnerabilities */
++  storeBufferMDS: Boolean = false
+ 
+ // DOC include end: BOOM Parameters
+ ) extends freechips.rocketchip.tile.CoreParams
+@@ -287,4 +290,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
+ 
+   val corePAddrBits = paddrBits
+   val corePgIdxBits = pgIdxBits
++
++  //************************************
++  // Backported vulns
++  val storeBufferMDS = boomParams.storeBufferMDS
+ }
+diff --git a/src/main/scala/ifu/bpd/bim.scala b/src/main/scala/ifu/bpd/bim.scala
+index 26656d45..cc6e2cff 100644
+--- a/src/main/scala/ifu/bpd/bim.scala
++++ b/src/main/scala/ifu/bpd/bim.scala
+@@ -41,7 +41,7 @@ class BIMBranchPredictorBank(params: BoomBIMParams = BoomBIMParams())(implicit p
+   val s2_meta           = Wire(new BIMMeta)
+   override val metaSz   = s2_meta.asUInt.getWidth
+ 
+-  val doing_reset = RegInit(true.B)
++  val doing_reset = RegInit(false.B)
+   val reset_idx = RegInit(0.U(log2Ceil(nSets).W))
+   reset_idx := reset_idx + doing_reset
+   when (reset_idx === (nSets-1).U) { doing_reset := false.B }
+diff --git a/src/main/scala/lsu/lsu.scala b/src/main/scala/lsu/lsu.scala
+index 1f17835d..0a558601 100644
+--- a/src/main/scala/lsu/lsu.scala
++++ b/src/main/scala/lsu/lsu.scala
+@@ -1138,17 +1138,47 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
+     }
+   }
+ 
++  val has_mds = if (storeBufferMDS) true.B else false.B
++
+   for (i <- 0 until numStqEntries) {
+     val s_addr = stq(i).bits.addr.bits
+     val s_uop  = stq(i).bits.uop
++
+     val dword_addr_matches = widthMap(w =>
+                              ( stq(i).bits.addr.valid      &&
+                               !stq(i).bits.addr_is_virtual &&
+-                              (s_addr(corePAddrBits-1,3) === lcam_addr(w)(corePAddrBits-1,3))))
++                              s_addr(corePAddrBits-1,3) === lcam_addr(w)(corePAddrBits-1,3)
++                              ))
++
++    // Simulate what Intel does, described in their patent:
++    // https://patentimages.storage.googleapis.com/73/b9/bf/b258f3e3985f47/US20080082765A1.pdf
++    val lower_addr_matches = widthMap(w =>
++                             ( stq(i).bits.addr.valid      &&
++                              s_addr(5,3) === lcam_addr(w)(5,3)
++                              ))
++
+     val write_mask = GenByteMask(s_addr, s_uop.mem_size)
+     for (w <- 0 until memWidth) {
+       when (do_ld_search(w) && stq(i).valid && lcam_st_dep_mask(w)(i)) {
+         when (((lcam_mask(w) & write_mask) === lcam_mask(w)) && !s_uop.is_fence && dword_addr_matches(w) && can_forward(w))
++        {
++          ldst_addr_matches(w)(i)            := true.B
++          ldst_forward_matches(w)(i)         := true.B
++          io.dmem.s1_kill(w)                 := RegNext(dmem_req_fire(w))
++          s1_set_execute(lcam_ldq_idx(w))    := false.B
++        }
++        // ----------- MDS
++        // Basically, we add a condition such that, whenever we are searching for
++        // forwarding opportunities towards an excepting load, we just look at
++        // the lower part of the address even if the full physical address is
++        // already available.
++        // On BOOM we don't have a two-phase address matching: the core waits
++        // for the physical address of the store to be available then compares
++        // it with the physical address of the current load.
++        //
++        // `do_ld_search` means that last cycle we translated the address of a load,
++        // so for sure the load's address is not virtual.
++          .elsewhen (has_mds && mem_xcpt_valids(w) && lower_addr_matches(w))
+         {
+           ldst_addr_matches(w)(i)            := true.B
+           ldst_forward_matches(w)(i)         := true.B

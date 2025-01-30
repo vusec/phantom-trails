@@ -1,0 +1,25 @@
+
+bootrom.rv32.elf:     file format elf32-littleriscv
+
+
+Disassembly of section .text.start:
+
+00010000 <_start>:
+   10000:	00000297          	auipc	t0,0x0
+   10004:	800002b7          	lui	t0,0x80000
+   10008:	00028067          	jr	t0 # 80000000 <_dtb+0x7ffeff70>
+
+Disassembly of section .text.hang:
+
+00010040 <_hang>:
+   10040:	00000297          	auipc	t0,0x0
+   10044:	800002b7          	lui	t0,0x80000
+   10048:	00028067          	jr	t0 # 80000000 <_dtb+0x7ffeff70>
+
+Disassembly of section .text.hang80:
+
+00010080 <_hang80>:
+   10080:	00000297          	auipc	t0,0x0
+   10084:	800002b7          	lui	t0,0x80000
+   10088:	00028067          	jr	t0 # 80000000 <_dtb+0x7ffeff70>
+   1008c:	00000013          	nop

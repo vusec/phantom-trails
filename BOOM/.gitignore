@@ -1,0 +1,11 @@
+shared/
+AFL/
+InstGen/
+llvm/
+ArchSim/
+Samples/
+Fuzzer
+TaintTracker
+.clang-format
+compile_flags.txt
+results

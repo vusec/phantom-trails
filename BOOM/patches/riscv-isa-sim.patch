@@ -1,0 +1,26 @@
+diff --git a/Makefile.in b/Makefile.in
+index b124991b..2e8b1dbe 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -124,7 +124,7 @@ all-link-flags := $(mcppbs-LDFLAGS) $(LDFLAGS)
+ comma := ,
+ LD            := $(CXX)
+ LIBS          := @LIBS@ @BOOST_ASIO_LIB@ @BOOST_REGEX_LIB@
+-LINK          := $(LD) -L. $(all-link-flags) -Wl,-rpath,$(install_libs_dir) $(patsubst -L%,-Wl$(comma)-rpath$(comma)%,$(filter -L%,$(LDFLAGS)))
++LINK          := $(LD) -L. $(all-link-flags) -Wl,-rpath,$(install_libs_dir)
+
+ # Library creation
+
+diff --git a/fesvr/tsi.h b/fesvr/tsi.h
+index 825a3a00..e34ea4e3 100644
+--- a/fesvr/tsi.h
++++ b/fesvr/tsi.h
+@@ -26,7 +26,7 @@ class tsi_t : public htif_t
+   uint32_t recv_word();
+   void switch_to_host();
+
+-  uint32_t in_bits() { return in_data.front(); }
++  uint32_t in_bits() { return in_data.empty() ? 0 : in_data.front(); }
+   bool in_valid() { return !in_data.empty(); }
+   bool out_ready() { return true; }
+   void tick(bool out_valid, uint32_t out_bits, bool in_ready);

@@ -1,0 +1,9 @@
+
+// -- Fuzzing wrapper for BOOM --
+
+val fuzzDir = file("generators/fuzz")
+
+lazy val fuzz = freshProject("fuzz", fuzzDir)
+  .dependsOn(testchipip, chipyard)
+  .settings(commonSettings)
+  .settings(chiselSettings)

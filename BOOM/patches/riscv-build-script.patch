@@ -1,0 +1,35 @@
+diff --git a/scripts/build-toolchain-extra.sh b/scripts/build-toolchain-extra.sh
+index 1769f4db..d6a74815 100755
+--- a/scripts/build-toolchain-extra.sh
++++ b/scripts/build-toolchain-extra.sh
+@@ -87,7 +87,12 @@ SRCDIR="$(pwd)/toolchains/${TOOLCHAIN}"
+ echo '==>  Installing Spike'
+ # disable boost explicitly for https://github.com/riscv-software-src/riscv-isa-sim/issues/834
+ # since we don't have it in our requirements
+-module_all riscv-isa-sim --prefix="${RISCV}" --with-boost=no --with-boost-asio=no --with-boost-regex=no
++module_prepare riscv-isa-sim
++cd  toolchains/riscv-tools/riscv-isa-sim/          && \
++    git apply ${PATCHES_PATH}/riscv-isa-sim.patch    && \
++    cd "${RDIR}"
++module_build riscv-isa-sim --prefix="${RISCV}" --with-boost=no --with-boost-asio=no --with-boost-regex=no
++
+ # build static libfesvr library for linking into firesim driver (or others)
+ echo '==>  Installing libfesvr static library'
+ OLDCLEANAFTERINSTALL=$CLEANAFTERINSTALL
+@@ -97,7 +102,7 @@ cp -p "${SRCDIR}/riscv-isa-sim/build/libfesvr.a" "${RISCV}/lib/"
+ CLEANAFTERINSTALL=$OLDCLEANAFTERINSTALL
+
+ echo '==>  Installing Proxy Kernel'
+-CC= CXX= module_all riscv-pk --prefix="${RISCV}" --host=riscv${XLEN}-unknown-elf
++CC= CXX= CFLAGS= CXXFLAGS= LDFLAGS= module_all riscv-pk --prefix="${RISCV}" --host=riscv${XLEN}-unknown-elf
+
+ echo '==>  Installing RISC-V tests'
+ module_all riscv-tests --prefix="${RISCV}/riscv${XLEN}-unknown-elf" --with-xlen=${XLEN}
+@@ -113,6 +118,6 @@ echo '==> Installing espresso logic minimizer'
+ # Common tools (not in any particular toolchain dir)
+
+ echo '==>  Installing libgloss'
+-CC= CXX= SRCDIR="$(pwd)/toolchains" module_all libgloss --prefix="${RISCV}/riscv${XLEN}-unknown-elf" --host=riscv${XLEN}-unknown-elf
++CC= CXX= CFLAGS= CXXFLAGS= LDFLAGS= SRCDIR="$(pwd)/toolchains" module_all libgloss --prefix="${RISCV}/riscv${XLEN}-unknown-elf" --host=riscv${XLEN}-unknown-elf
+
+ echo "Extra Toolchain Utilities/Tests Build Complete!"
