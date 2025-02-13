@@ -1,0 +1,16 @@
+diff --git a/ArchSim/ArchSim.h b/ArchSim/ArchSim.h
+index 61af1e1..b774c6c 100644
+--- a/ArchSim/ArchSim.h
++++ b/ArchSim/ArchSim.h
+@@ -213,7 +213,10 @@ public:
+                     << "\n";
+         }
+ 
+-        return 0;
++        if (proc->illegal_jump and proc->illegal_jump_type == processor_t::IllegalJumpType::OUTSIDE_VALID_MEM) {
++        } else {
++          return 0;
++        }
+       }
+     }
+ 

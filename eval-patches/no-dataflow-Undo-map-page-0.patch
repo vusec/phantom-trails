@@ -1,0 +1,14 @@
+diff --git a/BOOM/boom-wrapper/init/init.S b/BOOM/boom-wrapper/init/init.S
+index 314d58e..c38b408 100644
+--- a/BOOM/boom-wrapper/init/init.S
++++ b/BOOM/boom-wrapper/init/init.S
+@@ -148,7 +148,8 @@ s_mem:
+ // table1@0x80002000
+ .section .table1 , "adw"
+ table1:
+-    .dword 0x20001401 // table2_addr0
++    # .dword 0x20001401 // table2_addr0
++    .dword 0x0 // empty
+     .dword 0x0 // empty
+     .dword 0x20000c01 // table2
+ 

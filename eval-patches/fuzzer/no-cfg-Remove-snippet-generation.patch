@@ -1,0 +1,34 @@
+From 9fbe6ea260b4f0dc0f512e514971da3d1c763ace Mon Sep 17 00:00:00 2001
+From: Alvise de Faveri Tron <elvisilde@gmail.com>
+Date: Thu, 28 Mar 2024 00:44:14 +0000
+Subject: [PATCH] [no-cfg] Remove snippet generation
+
+---
+ src/mutator.rs | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/mutator.rs b/src/mutator.rs
+index f9105d5..af89530 100644
+--- a/src/mutator.rs
++++ b/src/mutator.rs
+@@ -276,7 +276,7 @@ pub type RiscVMutationList = tuple_list_type!(
+     RiscVInstructionMutator,
+     RiscVInstructionMutator,
+     RiscVInstructionMutator,
+-    RiscVInstructionMutator,
++    // RiscVInstructionMutator,
+ );
+ 
+ /// Provides a list of all supported RISC-V instruction mutators.
+@@ -294,7 +294,7 @@ pub fn all_riscv_mutations() -> RiscVMutationList {
+         RiscVInstructionMutator::new(Mutation::RepeatSeveral),
+         RiscVInstructionMutator::new(Mutation::SwapTwo),
+         RiscVInstructionMutator::new(Mutation::SwapTwo),
+-        RiscVInstructionMutator::new(Mutation::Snippet),
++        // RiscVInstructionMutator::new(Mutation::Snippet),
+     )
+ }
+ 
+-- 
+2.34.1
+
