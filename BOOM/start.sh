@@ -18,7 +18,7 @@ then
       boom_config="FuzzConfig"
 fi
 
-./docker/build_impl.sh --build-arg "COVERAGE=$coverage_mode" --build-arg "BOOM_BUILD_FLAGS='--config=$boom_config --debug'" --build-arg "NPROCS=`nproc`"
+./docker/build_impl.sh --build-arg "COVERAGE=$coverage_mode" --build-arg "BOOM_BUILD_FLAGS='--config=$boom_config'" --build-arg "NPROCS=`nproc`"
 
 export OUTPUT_DIR="$(pwd)/results/manually_started/$(date +%F-%T)"
 
