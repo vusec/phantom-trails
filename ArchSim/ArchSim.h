@@ -148,7 +148,7 @@ public:
         std::cerr << "[ARCHSIM] Code Region: (0x" << std::hex << reg.first
                   << ", 0x" << std::hex << reg.second << ")\n";
   }
-  
+
   /// Load program from a file to the simulation RAM.
   void loadProgramFromFile(const char *file, uint64_t code_sz) {
     uint64_t size = mem.loadProgram(file);
@@ -213,10 +213,7 @@ public:
                     << "\n";
         }
 
-        if (proc->illegal_jump and proc->illegal_jump_type == processor_t::IllegalJumpType::OUTSIDE_VALID_MEM) {
-        } else {
-          return 0;
-        }
+        return 0;
       }
     }
 
