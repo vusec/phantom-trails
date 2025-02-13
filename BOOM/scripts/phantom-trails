@@ -227,7 +227,7 @@ Available commands are:
         parser.add_argument(
             '--mds-init', default="/boom-wrapper/init/init-mds.bin", help="Path of the MDS init code, can be empty")
         parser.add_argument(
-            '--mds-taint-cycle', type=int, default=1640, help="Last cycle of the MDS initialization (buffers are tainted here)")
+            '--mds-taint-cycle', type=int, default=1733, help="Last cycle of the MDS initialization (buffers are tainted here)")
 
         parser.add_argument(
             '--code_regions', help="File specifying which regions contain code (default is the whole binary).")
@@ -262,7 +262,7 @@ Available commands are:
         parser.add_argument(
             '--mds-init', default="/boom-wrapper/init/init-mds.bin", help="Path of the MDS init code, can be empty")
         parser.add_argument(
-            '--mds-taint-cycle', type=int, default=1640, help="Last cycle of the MDS initialization (buffers are tainted here)")
+            '--mds-taint-cycle', type=int, default=1733, help="Last cycle of the MDS initialization (buffers are tainted here)")
 
         parser.add_argument(
             '--aflpath', default="sim-fuzzer", help="Path of afl-fuzz")
