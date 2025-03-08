@@ -19,4 +19,13 @@ rsync -ap --exclude .git --exclude build ../Samples .
 
 echo " • Build args are: $@"
 
-docker build . "$@" --network=host --tag $CONTAINER_NAME
+# Create insecure builder to enable changing personality during docker build
+# (needed to disable ASLR for MSAN, see https://github.com/google/sanitizers/issues/1614)
+docker buildx create --driver-opt image=moby/buildkit:master  \
+                     --use --name insecure-builder \
+                     --buildkitd-flags '--allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host' || echo "Using existing builder"
+docker buildx use insecure-builder
+# Build.
+docker buildx build --load --allow security.insecure . "$@" --network=host --tag $CONTAINER_NAME
+# Switch back to default builder.
+#docker buildx use default

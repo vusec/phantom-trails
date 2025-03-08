@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.3-labs
+
 FROM ubuntu:23.04 AS base
 
 # Ubuntu23 is EOL :rip:
@@ -123,7 +125,7 @@ ENV HWFUZZ_COVERAGE=$COVERAGE
 # Create fake compiler.
 COPY instrumentation /fake-compiler
 WORKDIR /fake-compiler
-RUN ./build-fake-g++.sh
+RUN --security=insecure ./build-fake-g++.sh
 # Install fake compiler.
 ENV PATH="/fake-compiler/:${PATH}"
 WORKDIR /fake-compiler
@@ -146,7 +148,7 @@ ENV FUZZING_EXPECTED_LIST /chipyard/sims/verilator/expected_findings
 # Build the architectural simulator.
 COPY ArchSim /ArchSim/
 WORKDIR /ArchSim
-RUN ./build-instrumented.sh
+RUN --security=insecure ./build-instrumented.sh
 
 # ------- Build Samples.
 SHELL ["conda", "run", "--no-capture-output", "-p",  "/chipyard/.conda-env", "/bin/bash", "-c"]
@@ -179,7 +181,7 @@ RUN cd /boom-wrapper/init && make
 
 # Build the simulation.
 WORKDIR /chipyard/sims/verilator
-RUN phantom-trails build -j${NPROCS} --sanitizer=$SANITIZER $(echo $BOOM_BUILD_FLAGS | sed "s/'//g")
+RUN --security=insecure phantom-trails build -j${NPROCS} --sanitizer=$SANITIZER $(echo $BOOM_BUILD_FLAGS | sed "s/'//g")
 
 RUN echo "source /chipyard/env.sh" >> ~/.bashrc
 ENV PATH /chipyard/.conda-env/bin:$PATH
