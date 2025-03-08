@@ -13,8 +13,8 @@ parser = argparse.ArgumentParser(description="Evaluate fuzzing results folder.")
 parser.add_argument("-v", "--verbose", action="store_true")
 parser.add_argument("-p", "--plot", action="store_true")
 parser.add_argument("-s", "--stats", action="store_true")
-parser.add_argument("-z", "--stats_single", action="store_true", default=None)
-parser.add_argument("-t", "--iters_single", action="store_true", default=None)
+parser.add_argument("-z", "--stats-single", action="store_true", default=None)
+parser.add_argument("-t", "--iters-single", action="store_true", default=None)
 parser.add_argument(
     "-m", "--merge", action="store_true", help="Merge static/dynamic bug types."
 )
@@ -78,6 +78,43 @@ class Run:
         for bug in self.tte_seconds.keys():
             self.tte_iterations[bug] = self.tte_seconds[bug] * execs_per_sec
 
+    def _init_partial(self, folder):
+        with open(path.join(folder, "iterations_time")) as f:
+            last_time = 0
+            last_iterations = 0
+            for line in f.readlines():
+                parts = line.split(" ")
+                time = int(parts[0])
+                iterations = int(parts[1])
+                # Unused:
+                # coverage = int(parts[2])
+
+                delta_time = time - last_time
+                delta_iters = iterations - last_iterations
+
+                if delta_time == 0:
+                    execs_per_sec = 1
+                else:
+                    execs_per_sec = delta_iters / delta_time
+
+                self.time_to_iterations_log.append(
+                    IterLogItem(time, iterations, execs_per_sec)
+                )
+
+                last_time = time
+                last_iterations = iterations
+
+        start_file = os.path.join(folder, "start_time_marker")
+        start_time = os.stat(start_file).st_ctime
+        for cause in os.listdir(os.path.join(folder, "causes")):
+            time = os.stat(os.path.join(folder, "causes", cause)).st_ctime - start_time
+            kind = cause.split('%')[0].strip().replace("_"," ")
+            if args.merge:
+                kind = kind.replace(" static", "").replace(" dynamic", "")
+            if not kind in self.tte_seconds.keys() or time < self.tte_seconds[kind]:
+                self.tte_seconds[kind] = time
+                self.tte_iterations[kind] = self._time_to_iterations(time)
+
     def _init_libafl(self, folder):
         with open(path.join(folder, "iterations_time")) as f:
             last_time = 0
@@ -123,8 +160,10 @@ class Run:
 
         if os.path.exists(path.join(folder, "found_all")):
             self._init_libafl(folder)
-        else:
+        elif os.path.exists(path.join(folder, "bug_timings")):
             self._init_aflpp(folder)
+        elif os.path.exists(path.join(folder, "causes")):
+            self._init_partial(folder)
 
 
     def get_causes(self):
@@ -202,7 +241,7 @@ class RunList:
         run_path = folder + "/"
         if not os.path.exists(run_path):
             return
-        if not os.path.exists(path.join(run_path, "found_all")) and not os.path.exists(path.join(run_path, "bug_timings")):
+        if not os.path.exists(path.join(run_path, "causes")) and not os.path.exists(path.join(run_path, "bug_timings")):
             return
         self.runs.append(Run(run_path))
 
@@ -284,8 +323,11 @@ class Analyzer:
         return self.getResultObjForMode(mode)
 
     def getModeForFolder(self, path):
-        with open(os.path.join(path, "run-info", "coverage-mode"), "r") as f:
-            return f.read().strip()
+        try:
+            with open(os.path.join(path, "run-info", "coverage-mode"), "r") as f:
+                return f.read().strip()
+        except:
+            return "default"
 
     def common_bugs(self):
         common_causes = set(list(self.stats_by_mode.values())[0].common_bugs())

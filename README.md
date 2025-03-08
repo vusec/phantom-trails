@@ -127,10 +127,19 @@ This will fuzz the simulation until all the bugs listed in `expected_findings.tx
 
 To kill the fuzzer, you might need to run `sudo killall sim-fuzzer && sudo killall run-FuzzConfig`.
 
-The results are available in the `out/causes` folder. You can disassemble with
+The results are available in the `out/causes` folder. You can view the TTEs with:
 
 ```bash
-riscv64-unknown-elf-objdump -b binary -m riscv:rv64 -M no-aliases -D <BINARY>
+# From inside the container...
+python3 /external/BOOM/eval-results-folder.py --stats-single out/
+# ... or from outside of the container
+python3 eval-results-folder.py --stats-single results/manually-started/<DATE>
+```
+
+You can disassemble specific outputs with:
+
+```bash
+riscv64-unknown-elf-objdump -b binary -m riscv:rv64 -M no-aliases -D out/causes/<BINARY>
 ```
 
 ### Spectre-LP
