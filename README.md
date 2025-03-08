@@ -9,7 +9,7 @@ More information in the [Full paper](https://download.vusec.net/papers/phantom-t
 Clone all dependencies:
 
 ```sh
-git clone git@github.com:vusec/phantom-trails.git --recursive
+git clone git@github.com:vusec/phantom-trails.git
 git submodule update --init --recursive
 ```
 
@@ -26,10 +26,19 @@ For more information about running the detector and the fuzzer, see `BOOM/README
 
 ### Troubleshooting
 
+- Step `build-fake-g++.sh` fails with the following message:
+  ```
+  FATAL: Code XXXX is out of application range. Non-PIE build?
+  FATAL: MemorySanitizer can not mmap the shadow memory.
+  [...]
+  ```
+    - This is caused by an [MSAN issue](https://github.com/google/sanitizers/issues/1614). As a workaround, you can either
+      1) reduce `vm.mmap_rnd_bits` (e.g. `sudo sysctl vm.mmap_rnd_bits=28` instead of `32`)
+      2) or disable ASLR completely (e.g. `echo 0 | sudo tee /proc/sys/kernel/randomize_va_space`)
 - Building job gets killed before finishing
   - It is highly likely that building LLVM saturated the available memory. Try reducing the number of building and linking jobs: replace `nproc` in `BOOM/start.sh` with a lower number
 - How do I kill the fuzzer?
-  - Unfortunately Ctrl^C doesn't work, you might need to `killall sim-fuzzer && killall run-FuzzConfig`
+  - When running inside of the TUI, Ctrl^C might not work. You can kill the fuzzer with `killall sim-fuzzer && killall run-FuzzConfig`
 
 ## Contents
 
@@ -116,7 +125,7 @@ phantom-trails fuzz
 
 This will fuzz the simulation until all the bugs listed in `expected_findings.txt` are found.
 
-To kill the fuzzer, you must run `sudo killall sim-fuzzer && sudo killall run-FuzzConfig` (unfortunately we did not find a better way),
+To kill the fuzzer, you might need to run `sudo killall sim-fuzzer && sudo killall run-FuzzConfig`.
 
 The results are available in the `out/causes` folder. You can disassemble with
 
