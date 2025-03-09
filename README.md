@@ -10,6 +10,7 @@ Clone all dependencies:
 
 ```sh
 git clone git@github.com:vusec/phantom-trails.git
+cd phantom-trails
 git submodule update --init --recursive
 ```
 
