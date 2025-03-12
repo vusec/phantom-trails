@@ -22,4 +22,4 @@ fi
 
 export OUTPUT_DIR="$(pwd)/results/manually_started/$(date +%F-%T)"
 
-./docker/start_impl.sh /usr/bin/fish
+./docker/start_impl.sh

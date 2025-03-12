@@ -180,3 +180,8 @@ RUN cd /boom-wrapper/init && make
 # Build the simulation.
 WORKDIR /chipyard/sims/verilator
 RUN phantom-trails build -j${NPROCS} --sanitizer=$SANITIZER $(echo $BOOM_BUILD_FLAGS | sed "s/'//g")
+
+RUN echo "source /chipyard/env.sh" >> ~/.bashrc
+ENV PATH /chipyard/.conda-env/bin:$PATH
+
+CMD /bin/bash -c "source /root/.bashrc && fish"
