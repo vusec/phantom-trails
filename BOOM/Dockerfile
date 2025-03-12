@@ -18,8 +18,8 @@ RUN apt-get update && \
     ln -s /usr/lib/llvm-14/lib/python3.10/dist-packages/lldb/* /usr/lib/python3/dist-packages/lldb/
 
 ARG NPROCS=32
-ARG COVERAGE=Taint
-ARG BOOM_BUILD_FLAGS="--debug"
+ARG COVERAGE=SplitCriticalEdges,BasicBlock
+ARG BOOM_BUILD_FLAGS=""
 ARG SANITIZER=MSAN
 
 # ------- Setup chipyard.
