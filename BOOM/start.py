@@ -103,7 +103,7 @@ class CmdHandler(object):
         if args.subparser_name == 'fuzz':
             self.start_fuzzer(args.quiet)
         elif args.subparser_name == 'shell':
-            self.start_container()
+            self.start_container("")
         elif args.subparser_name == 'run':
             self.start_container(args.cmd)
         elif args.subparser_name == 'test':
