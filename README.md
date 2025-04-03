@@ -1,12 +1,12 @@
 # Phantom Trails
 
-Fuzzing processor simulations with taint tracking.
+Fuzzing processor simulations with (software) taint tracking.
 
-More information in the [Full paper](https://download.vusec.net/papers/phantom-trails_sec25.pdf) (USENIX Security '25).
+More information in the [paper](https://download.vusec.net/papers/phantom-trails_sec25.pdf) (USENIX Security '25).
 
 ## Quick Start
 
-Clone all dependencies:
+First, clone the repository and all its submodules.
 
 ```sh
 git clone git@github.com:vusec/phantom-trails.git
@@ -14,205 +14,97 @@ cd phantom-trails
 git submodule update --init --recursive
 ```
 
-Build the instrumented simulation in a container (takes ~40min on a 48 cores/128GB RAM machine):
+Next, build the container (takes ~40min on a 48 cores/128GB RAM machine)
+and start a `fish` shell inside it:
 
 ```sh
 cd BOOM
-./start.sh
-# ... Build LLVM, Boom simulation etc...
-(container) phantom-trails --help
+./start.py shell
 ```
 
-For more information about running the detector and the fuzzer, see `BOOM/README.md`.
+> Note: this is equivalent to the `start.sh` script mentioned in the paper's
+> Artifact Appendix.
 
-### Troubleshooting
+## Evaluation and Usage
 
-- Step `build-fake-g++.sh` fails with the following message:
-  ```
-  FATAL: Code XXXX is out of application range. Non-PIE build?
-  FATAL: MemorySanitizer can not mmap the shadow memory.
-  [...]
-  ```
-    - This is caused by an [MSAN issue](https://github.com/google/sanitizers/issues/1614). As a workaround, you can either
-      1) reduce `vm.mmap_rnd_bits` (e.g. `sudo sysctl vm.mmap_rnd_bits=28` instead of `32`)
-      2) or disable ASLR completely (e.g. `echo 0 | sudo tee /proc/sys/kernel/randomize_va_space`)
-- Building job gets killed before finishing
-  - It is highly likely that building LLVM saturated the available memory. Try reducing the number of building and linking jobs: replace `nproc` in `BOOM/start.sh` with a lower number
-- How do I kill the fuzzer?
-  - When running inside of the TUI, Ctrl^C might not work. You can kill the fuzzer with `killall sim-fuzzer && killall run-FuzzConfig`
+To run fuzzing campaigns and reproduce the results reported in our paper, you can check the [evaluation doc page](docs/eval.md).
 
-## Contents
+For more advanced usage of the tool, you can check the [dedicated doc page](docs/usage.md).
 
-This repository includes various components:
+## Troubleshooting
 
-- Our custom setup for the [BOOM core](https://github.com/riscv-boom/riscv-boom) (`BOOM/` folder)
-- Our fork of the [Spike](https://github.com/riscv-software-src/riscv-isa-sim) architectural simulator (`ArchSim/` folder)
-- Our instrumentation infrastructure, based on **LLVM**
-- Our fuzzing infrastructure, including of our fork of [AFL++](https://github.com/AFLplusplus/AFLplusplus) (`AFL/` folder ) and [LibAFL](https://github.com/AFLplusplus/LibAFL) (`Fuzzer/LibAFL` folder)
-- A collection of **RISC-V PoCs** for the BOOM core
+<details>
 
-### BOOM
+<summary>
+MemorySanitizer can not mmap the shadow memory
+</summary>
 
-The BOOM setup consists of:
-
-- A simulation harness used for detection (`BOOM/boom-wrapper/src`)
-  - `src/main/resources/csrc` contains the `main` entrypoint for the verilated sinmulation
-  - `src/main/resources/vsrc` contains the Black-Box simulated DRAM
-  - `src/main/scala` contains all the Configurations we use for evaluation
-- The bootrom code (`BOOM/boom-wrapper/boot`)
-- The initialization code (`BOOM/boom-wrapper/init`)
-- A patch to add MDS-Store Buffer to BOOM (`BOOM/patches/boom-mds.patch`)
-- A `Dockerfile` for building and running the instrumented simulation with all dependencies (see `BOOM/README.md`)
-
-### Spike
-
-
-To automatically infer secrets, the BOOM wrapper uses a custom
-library that wraps the Spike architectural simulation.
-In the `ArchSim/` folder you can find:
-
-- The `processor.patch` applied to Spike (adds logging and early exit)
-- The `ArchSim.h` file containing code to run Spike
-- The `SpikeWrapper` API used to run Spike from the fuzzer code
-
-### Instrumentation
-
-Our bit-precise taint tracking sanitizer (BFSAN) is implemented as a patch to MSAN (`llvm/` folder) and applied when compiling the Verilated
-simulation into a binary.
-
-Check the diff of our fork to see where MSAN is modified.
-
-### Fuzzing Infrastructure
-
-Our fuzzing infrastructure consists of:
-
-- AFL++ fork that adds taint coverage (`AFL/`)
-  - [this commit](https://github.com/vusec/hw-fuzzing-AFL/commit/a6a2291746ceb1d3c2dce9cb8aa2a350cfd852a3) contains the relevant diff
-- Fuzzing driver (`Fuzzer/`)
-  - `LibAFL/`: Our fork of LibAFL with minor patches to avoid crashes/timeouts
-  - `opcodes/`: Our fork of [riscv-opcodes](https://github.com/riscv/riscv-opcodes) that adds C++ and Rust headers generation
-  - Instruction generator and mutator (inside `Fuzzer/src`)
-
-### PoCs
-
-We also provide the PoC testsuite we used to evaluate our detector on different transient execution vulnerabilities (`Samples/`), including:
-  - different versions of our newly found vulnerability Spectre-LoopPredictor (`Sample/src/spectre-lp`)
-  - PoCs of known vulnerabilities (`Samples/src/pocs`)
-
-
-## Evaluation
-
-### Setup
-
-To build our standard configuration, use `BOOM/start.sh`. This will build a MediumBoom simulation instrumented with the Software feedback.
-
-### PoCs
-
-The minimal detectable PoCs for each variant can be found in `Samples/src/pocs`.
-
-In the docker container, you can run each sample using:
-
-```bash
-phantom-trails run /Samples/build/bins/pocs/<POC>
-```
-
-### Fuzzing
-
-To start a fuzzing campaign, you can run
-
-```bash
-phantom-trails fuzz
-```
-
-This will fuzz the simulation until all the bugs listed in `expected_findings.txt` are found.
-
-To kill the fuzzer, you might need to run `sudo killall sim-fuzzer && sudo killall run-FuzzConfig`.
-
-The results are available in the `out/causes` folder. You can view the TTEs with:
-
-```bash
-# From inside the container...
-python3 /external/BOOM/eval-results-folder.py --stats-single out/
-# ... or from outside of the container
-python3 eval-results-folder.py --stats-single results/manually-started/<DATE>
-```
-
-You can disassemble specific outputs with:
-
-```bash
-riscv64-unknown-elf-objdump -b binary -m riscv:rv64 -M no-aliases -D out/causes/<BINARY>
-```
-
-### Spectre-LP
-
-PoCs for Spectre-LP can be found in `Samples/src/spectre-lp`. In particular, you can find:
-
-* `poc-minimal`: the simplest case found by the fuzzer
-* `poc-ret`: uses nested calls to saturate the RAS and mispredict rets consecutively
-* `poc-loop`: samples that uses branch misprediction instead of RET misprediction to trigger the LP
-
-`spectre-lp/boom-disclosure/README` provides instructions to reproduce
-on the Stock BOOM configuration.
-
-### Taint as Feedback
-
-```bash
-./start.sh "Taint"
-```
-
-Will re-build the instrumentation adding the Taint feedback. The same
-instructions apply for fuzzing.
-
-### Impact of Program Generation
-
-The `eval-patches/` folder contains a set of patches to disable fuzzing
-optimizations.
-
-### SmallBoom
-
-Most pre-silicon fuzzers evaluate on SmallBoom.
-
-- Build PhantomTrails in `SmallFuzzConfig`
+If you get a runtime error like:
 
 ```
-phnatom-trails build --config SmallFuzzConfig
-phantom-trails fuzz --config SmallFuzzConfig
+FATAL: Code XXXX is out of application range. Non-PIE build?
+FATAL: MemorySanitizer can not mmap the shadow memory.
+[...]
+```
+This is caused by a known [MSAN issue with ASLR](https://github.com/google/sanitizers/issues/1614), which should be fixed by our implementation. If this still happens on your machine, you can either:
+  1) reduce `vm.mmap_rnd_bits` (e.g. `sudo sysctl vm.mmap_rnd_bits=28` instead of `32`)
+  2) or disable ASLR completely (e.g. `echo 0 | sudo tee /proc/sys/kernel/randomize_va_space`)
+
+</details>
+
+
+<details>
+
+<summary>
+RISCV toolchain is not found inside of the container
+</summary>
+
+If you get errors like this:
+
+```
+*** RISCV is unset. Did you source the Chipyard auto-generated env file?
 ```
 
-### MDS
+You need to make sure `/chipyard/env.sh` is sourced (from a bash shell).
 
-To evaluate PhantomTrails on MDS, you will need to:
+</details>
 
-1. Build BOOM with MDS-SB
+<details>
 
-```bash
-phantom-trails build --config MDSConfig
+<summary>
+Docker build exits prematurely
+</summary>
+
+It is highly likely that building LLVM saturated the available memory. Try reducing the number of building and linking jobs: replace `nproc` in `BOOM/start.sh` with a lower number.
+</details>
+
+<details>
+
+<summary>
+How do I kill the fuzzer?
+</summary>
+
+When running inside of the TUI, Ctrl^C might not work. You can kill the fuzzer with `killall sim-fuzzer && killall run-FuzzConfig`
+</details>
+
+## Repo Structure
+
+```sh
+.
+├── AFL      # Our AFL++ fork with coverage metrics.
+├── ArchSim/ # Spike (ISA simulator) + wrapper.
+├── BOOM/    # Our target.
+│   ├── boom-wrapper/  # C++ harness, init code, ...
+│   ├── results/       # Fuzzing results are saved here.
+│   ├── scripts/       # Contains `phantom-trails` script.
+│   ├── shared/        # Shared with the container.
+│   └── start.py       # Entrypoint script
+├── docs     # Documentation.
+├── Fuzzer   # libAFL fuzzer.
+├── llvm     # Our LLVM fork with BFSAN.
+└── Samples  # PoCs and Spectre-LP docs.
+
 ```
 
-2. Run MDS sample
+More details can be found in the [components doc page](docs/components.md).
 
-```bash
-phantom-trails run --config MDSConfig --mds /Samples/build/bins/mds-tests/mds.bin
-```
-
-
-
-### Cycle-accurate debugging
-
-Optionally, you can print a cycle-accurate report of the simulation.
-
-```bash
-make clean
-phantom trails build --debug -j<PROCS>
-phantom-trails run <PROGRAM> --verbose
-
-# You can also inspect internal buffers.
-PRINT_ROB=1 PRINT_REGFILE=1 PRINT_LSQ=1 phantom-trails run <PROGRAM> --verbose
-
-# Dump the content of memory before starting
-MEMDUMP=1 phantom-trails run <PROGRAM>
-# will be in <PROGRAM>.memdump
-
-# Print total amount of taint, cycle-by-cyle.
-PRINT_COVERAGE=1 phantom-trails run <PROGRAM> --logfile out.log
-```

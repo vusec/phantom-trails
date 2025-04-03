@@ -59,10 +59,12 @@ static const cfg_t build_config(uint64_t ram_base, uint64_t ram_size) {
 class ArchSim : public simif_t {
 public:
   ArchSim(uint64_t ram_base, uint64_t ram_size, bool record_addresses,
-          bool verbose, bool filters_enabled=true, bool record=true)
+          bool verbose, bool filters_enabled = true)
       : cfg(build_config(ram_base, ram_size)), isa(cfg.isa(), cfg.priv()),
         mem(ram_base, ram_size), reset_state(true),
-        filters_enabled(filters_enabled), record_addresses(record) {
+        filters_enabled(filters_enabled), verbose(verbose),
+        record_addresses(record_addresses),
+        discard_illegal_jumps(!std::getenv("PHANTOM_TRAILS_NO_ILLEGAL_JUMPS")) {
 
     // memory
     bus.add_device(ram_base, &mem);
@@ -92,7 +94,6 @@ public:
     // processor
     proc = new processor_t(&isa, &cfg, this, 0, false, stderr, std::cerr,
                            ROM_ADDR);
-    this->verbose = verbose;
     initProc(proc);
   }
 
@@ -181,7 +182,8 @@ public:
   void step(size_t n) { proc->step(n); }
 
   /// Run the simulation until max_cycles or an ealy-exit condition is found.
-  /// Returns the number of cycles that the simulation was actually ran for.
+  /// Returns the number of cycles that the simulation was actually ran for,
+  /// or 0 if the program has to be discarded.
   uint64_t run(uint64_t max_cycles) {
     uint64_t tick = 0;
     while (tick < max_cycles) {
@@ -200,8 +202,11 @@ public:
       }
 
       // Filters.
-      if (filters_enabled and
-          (proc->illegal_jump or proc->self_modifying or illegal_device or proc->accessed_forbidden_region)) {
+      bool discard = (proc->illegal_jump and discard_illegal_jumps) or
+                     proc->self_modifying or illegal_device or
+                     proc->accessed_forbidden_region;
+
+      if (filters_enabled and discard) {
         if (verbose) {
           std::cerr << "[ARCHSIM] Discarded: illegal_jmp= " << proc->illegal_jump
                     << "   self_modifying= " << proc->self_modifying
@@ -213,6 +218,8 @@ public:
                     << "\n";
         }
 
+        // In case the programs needs to be discarded, we tell the caller that
+        // it took 0 cycles.
         return 0;
       }
     }
@@ -265,9 +272,6 @@ public:
   // Getters
   processor_t *getCore(size_t i) { return proc; }
   uint64_t getPC(size_t i) { return proc->get_state()->pc; }
-  // Setters
-  void enableFilters() { filters_enabled = true; }
-  void disableFilters() { filters_enabled = false; }
 
 private:
   const cfg_t cfg;
@@ -283,9 +287,10 @@ private:
   std::vector<std::pair<uint64_t, size_t>> mmio_loads;
   std::vector<std::pair<uint64_t, size_t>> mmio_stores;
 
-  bool verbose;
-  bool filters_enabled;
-  bool record_addresses;
+  const bool verbose;
+  const bool filters_enabled;
+  const bool record_addresses;
+  const bool discard_illegal_jumps;
   bool illegal_device;
 
   std::vector<std::pair<uint64_t, uint64_t>> allowed_devices;

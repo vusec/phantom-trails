@@ -1,26 +1,23 @@
 # syntax=docker/dockerfile:1.3-labs
 
 FROM ubuntu:23.04 AS base
-
 # Ubuntu23 is EOL :rip:
 RUN sed -i "s/archive/old-releases/g" /etc/apt/sources.list
 RUN sed -i "s/security\./old-releases\./g" /etc/apt/sources.list
-
-# Prerequisites.
-# Also fix messed up default LLDB installation.
-# psmisc -> `killall` command (used by  the fuzzer to stop itself)/
-COPY docker/install-rust.sh /tmp/
-RUN apt-get update && \
-    apt-get install -y make cmake ninja-build git python3 wget lld gcc g++ \
-    nano fish gdb lldb python3-pip device-tree-compiler bc liblldb-dev curl \
-    psmisc htop && \
-    /tmp/install-rust.sh && rm /tmp/install-rust.sh && \
-    ln -s /usr/lib/llvm-14/lib/python3.10/dist-packages/lldb/* /usr/lib/python3/dist-packages/lldb/
 
 ARG NPROCS=32
 ARG COVERAGE=SplitCriticalEdges,BasicBlock
 ARG BOOM_BUILD_FLAGS=""
 ARG SANITIZER=MSAN
+
+# Prerequisites.
+# Also fix messed up default LLDB installation.
+# psmisc -> `killall` command (used by  the fuzzer to stop itself)/
+RUN apt-get update && \
+    apt-get install -y make cmake ninja-build git python3 wget lld gcc g++ \
+    nano fish gdb lldb python3-pip device-tree-compiler bc liblldb-dev curl \
+    psmisc htop && \
+    ln -s /usr/lib/llvm-14/lib/python3.10/dist-packages/lldb/* /usr/lib/python3/dist-packages/lldb/
 
 # ------- Setup chipyard.
 WORKDIR /
@@ -131,20 +128,7 @@ ENV PATH="/fake-compiler/:${PATH}"
 WORKDIR /fake-compiler
 RUN ./install-fake-g++.sh
 
-# ------- Install Fuzzer
-
-# Install fuzzer.
-COPY Fuzzer /driver/Fuzzer/
-COPY docker/install-fuzzer.sh /driver/Fuzzer
-RUN cd /driver/Fuzzer ; bash install-fuzzer.sh
-ENV PATH="/driver/Fuzzer/target/release/:$PATH"
-
-# Tell the fuzzer which bugs it needs to find.
-COPY expected_findings /chipyard/sims/verilator/expected_findings
-ENV FUZZING_EXPECTED_LIST /chipyard/sims/verilator/expected_findings
-
 # ------- Build Spike.
-
 # Build the architectural simulator.
 COPY ArchSim /ArchSim/
 WORKDIR /ArchSim
@@ -154,7 +138,8 @@ RUN --security=insecure ./build-instrumented.sh
 SHELL ["conda", "run", "--no-capture-output", "-p",  "/chipyard/.conda-env", "/bin/bash", "-c"]
 
 # Copy over handy scripts.
-COPY scripts /scripts
+WORKDIR /scripts
+COPY scripts/hex2bin /scripts/hex2bin
 ENV PATH="/scripts/:${PATH}"
 
 # Build RISC-V binaries.
@@ -163,6 +148,9 @@ RUN cd /Samples && make clean && make
 RUN ln -sf /chipyard/sims/verilator/programs  /Samples
 
 # ------- Build custom BOOM wrapper.
+# Install fuzzer header.
+COPY Fuzzer/FuzzerAPI.h /driver/Fuzzer/FuzzerAPI.h
+COPY Fuzzer/FuzzerCoverage.h /driver/Fuzzer/FuzzerCoverage.h
 
 # Add our custom BOOM wrapper to chipyard.
 COPY boom-wrapper /boom-wrapper
@@ -181,9 +169,35 @@ RUN cd /boom-wrapper/init && make
 
 # Build the simulation.
 WORKDIR /chipyard/sims/verilator
+COPY scripts/phantom-trails /scripts/phantom-trails
 RUN --security=insecure phantom-trails build -j${NPROCS} --sanitizer=$SANITIZER $(echo $BOOM_BUILD_FLAGS | sed "s/'//g")
 
+# Prepare for shell exec (default command).
 RUN echo "source /chipyard/env.sh" >> ~/.bashrc
 ENV PATH /chipyard/.conda-env/bin:$PATH
 
-CMD /bin/bash -c "source /root/.bashrc && fish"
+# ------- Install Fuzzer
+COPY docker/install-rust.sh /tmp/
+RUN /tmp/install-rust.sh && rm /tmp/install-rust.sh
+
+# Install fuzzer.
+COPY Fuzzer /driver/Fuzzer/
+COPY docker/install-fuzzer.sh /driver/Fuzzer
+RUN --security=insecure cd /driver/Fuzzer ; bash install-fuzzer.sh
+ENV PATH="/driver/Fuzzer/target/release/:$PATH"
+
+# Tell the fuzzer which bugs it needs to find.
+COPY expected_findings /chipyard/sims/verilator/expected_findings
+ENV FUZZING_EXPECTED_LIST /chipyard/sims/verilator/expected_findings
+
+# Prepare for fuzzing.
+RUN mkdir -p in
+RUN mkdir -p out
+# Create a dummy seed (not actually used for now...).
+RUN echo " " > in/seed.txt
+
+# Copy the rest of the scripts.
+COPY scripts /scripts
+
+# ------- Default CMD
+CMD /bin/bash -c "source /root/.bashrc && fish || echo 'Bye!'"

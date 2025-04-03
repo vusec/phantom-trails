@@ -3,7 +3,7 @@
 To build the container and open a shell inside the generated environment:
 
 ```sh
-./start.sh
+./start.py shell
 (container) echo "I'm in"
 ```
 
@@ -17,6 +17,7 @@ $ phantom-trails run /Samples/build/bins/pocs/meltdown-us.bin
 $ phantom-trails run /Samples/build/bins/pocs/meltdown-us.bin --verbose
 
 # Fuzz the simulation from an empty seed.
+# You can also use `start.py fuzz` from outside of the container.
 $ phantom-trails fuzz
 ```
 
