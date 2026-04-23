@@ -24,5 +24,9 @@ source "$HOME/.cargo/env"
 cargo update -p postcard@1.1.3 --precise 1.1.1
 #cargo update -p backtrace@0.3.75 --precise 0.3.68
 
+cargo update -p uuid --precise 1.3.0
+#cargo update -p getrandom@0.4.2 --precise 0.3.4
+
+
 cargo build --release
 cargo build
