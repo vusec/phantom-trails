@@ -27,6 +27,8 @@ cargo update -p postcard@1.1.3 --precise 1.1.1
 cargo update -p uuid --precise 1.3.0
 #cargo update -p getrandom@0.4.2 --precise 0.3.4
 
+cargo update -p unicode-segmentation@1.13.2 --precise 1.12.0
+
 
 cargo build --release
 cargo build
